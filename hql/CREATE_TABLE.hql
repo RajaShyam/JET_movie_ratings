@@ -19,4 +19,4 @@ STORED AS INPUTFORMAT
 OUTPUTFORMAT
   'org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat'
 LOCATION
-  's3://grubhub-gdp-source-data-assets-dev/nrajashyam/JE/output/batch_id=1613301962/';
+  's3://<bucket_name>/nrajashyam/JE/output/batch_id=1613301962/';

@@ -78,7 +78,7 @@ class Ingestion():
         :return:
         """
         alter_stmt = "ALTER TABLE shyam.movie_ratings ADD IF NOT EXISTS PARTITION (year={year},month={month}) " \
-        " LOCATION 's3://grubhub-gdp-source-data-assets-dev/nrajashyam/JE/output/batch_id=1613301962/year={year}/month={month}/'"
+        " LOCATION 's3://bucket-name/nrajashyam/JE/output/batch_id=1613301962/year={year}/month={month}/'"
         alter_drop_stmt = "ALTER TABLE shyam.movie_ratings DROP IF EXISTS PARTITION (year={year},month={month})"
         for year in years:
             for month in range(1, 13):
@@ -219,7 +219,7 @@ class MovieRatingsBatchIngestion(Ingestion):
         :param ratings_meta_df:
         :return:
         """
-        ratings_meta_df.coalesce(1).write.parquet(path='s3://grubhub-gdp-source-data-assets-dev/nrajashyam/JE/output/batch_id=1613301962',
+        ratings_meta_df.coalesce(1).write.parquet(path='s3://bucket-name/nrajashyam/JE/output/batch_id=1613301962',
                                       mode='overwrite',
                                       partitionBy=self.partition_cols)
 
