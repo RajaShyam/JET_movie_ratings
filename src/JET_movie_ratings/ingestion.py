@@ -2,7 +2,7 @@ import logging
 
 from abc import abstractmethod
 from pyspark.sql.types import StructType, StructField, StringType, FloatType, LongType, ArrayType, DoubleType
-from pyspark.sql.functions import from_unixtime, month, year ,udf, regexp_replace, col
+from pyspark.sql.functions import from_unixtime, month, year ,udf, regexp_replace, col, current_timestamp
 
 
 class HiveExecutionException(Exception):
@@ -27,6 +27,7 @@ class Ingestion():
                                 'month', 'meta_asin', 'title']
         self.partition_cols = ['year', 'month']
         self.logger = logger
+        self.num_coalesce = 1
 
     @staticmethod
     def get_ratings_schema():
@@ -66,6 +67,7 @@ class Ingestion():
         ratings_df = ratings_df.withColumn('rating_dt', from_unixtime(ratings_df.rating_time, format='yyyy-MM-dd'))
         ratings_df = ratings_df.withColumn('month', month(ratings_df.rating_dt))
         ratings_df = ratings_df.withColumn('year', year(ratings_df.rating_dt))
+        ratings_df = ratings_df.distinct()
         ratings_df.printSchema()
         return ratings_df
 
@@ -113,6 +115,7 @@ class Ingestion():
             'corrected_data.*')
         final_movies_meta_df = movies_meta_filtered_df.unionByName(corrupted_records_df_formatted)
         final_movies_meta_df = final_movies_meta_df.withColumnRenamed('asin', 'meta_asin')
+        final_movies_meta_df = final_movies_meta_df.distinct()
         return final_movies_meta_df
 
     def transform(self,
@@ -131,26 +134,25 @@ class Ingestion():
         ratings_meta_df.show(10, False)
         return ratings_meta_df
 
-    def add_hive_partitions(self, years):
+    def add_hive_partitions(self, years, output_path):
         """
         Adds hive partitions to the table
-        :param years:
-        :return:
+        :param output_path: output path for saving data
+        :param years: list of years in the dataset
+        :return: None
         """
         alter_stmt = "ALTER TABLE shyam.movie_ratings ADD IF NOT EXISTS PARTITION (year={year},month={month}) " \
-        " LOCATION 's3://bucket-name/nrajashyam/JE/output/batch_id=1613301962/year={year}/month={month}/'"
+        " LOCATION '{output_path}/year={year}/month={month}/'"
         alter_drop_stmt = "ALTER TABLE shyam.movie_ratings DROP IF EXISTS PARTITION (year={year},month={month})"
         for year in years:
             for month in range(1, 13):
                 try:
                     self.logger.info(alter_drop_stmt.format(year=year, month=month))
-                    self.logger.info(alter_stmt.format(year=year, month=month))
+                    self.logger.info(alter_stmt.format(year=year, month=month, output_path=output_path))
                     self.spark.sql(alter_drop_stmt.format(year=year, month=month))
-                    self.spark.sql(alter_stmt.format(year=year, month=month))
+                    self.spark.sql(alter_stmt.format(year=year, month=month,output_path=output_path))
                 except HiveExecutionException as err:
                     self.logger.info('Hive execution statement failed :- '+err)
-
-
 
     @abstractmethod
     def read(self):
@@ -189,6 +191,8 @@ class MovieRatingsBatchIngestion(Ingestion):
         :param spark: spark_session
         """
         super(MovieRatingsBatchIngestion, self).__init__(spark, logger)
+        self.output_path = 'hdfs:///tmp/JET/batch_movies_meta/output/batch_id=1613301962/'
+        #self.output_path = 's3://grubhub-gdp-source-data-assets-dev/nrajashyam/JE/output/batch_id=1613301962'
 
     def read(self):
         """
@@ -209,13 +213,19 @@ class MovieRatingsBatchIngestion(Ingestion):
     def save(self,
              ratings_meta_df):
         """
-        save the ratings and meta joined data to s3 and further analysis
-        :param ratings_meta_df:
-        :return:
+        save the ratings and meta to storage, below is the sample data once data is transformed
+        +--------------+----------+-------+-----------+----------+----+-----+----------+----------------------------+
+        |reviewerID    |asin      |ratings|rating_time|rating_dt |year|month|meta_asin |title                       |
+        +--------------+----------+-------+-----------+----------+----+-----+----------+----------------------------+
+        |A3TMUPDDXN8032|0738920630|4.0    |1283126400 |2010-08-30|2010|8    |0738920630|Works - Fun and Games [VHS] |
+        |A3UTPOE8HGE0RY|0738920630|4.0    |1104278400 |2004-12-29|2004|12   |0738920630|Works - Fun and Games [VHS] |
+        +--------------+----------+-------+-----------+----------+----+-----+----------+----------------------------+
+        :param ratings_meta_df: joined and transformed data of movie ratings and meta movies data
+        :return: None
         """
-        ratings_meta_df.coalesce(1).write.parquet(path='s3://bucket-name/nrajashyam/JE/output/batch_id=1613301962',
-                                      mode='overwrite',
-                                      partitionBy=self.partition_cols)
+        ratings_meta_df.coalesce(1).write.parquet(path=self.output_path,
+                                                  mode='overwrite',
+                                                  partitionBy=self.partition_cols)
 
     def process(self):
         """
@@ -228,7 +238,7 @@ class MovieRatingsBatchIngestion(Ingestion):
         row_years = ratings_meta_df.select('year').distinct().collect()
         years = [r.year for r in row_years]
         self.logger.info(years)
-        self.add_hive_partitions(years)
+        self.add_hive_partitions(years, self.output_path)
 
 
 class MovieRatingsStreamingIngestion(Ingestion):
@@ -239,10 +249,16 @@ class MovieRatingsStreamingIngestion(Ingestion):
         """"""
         super(MovieRatingsStreamingIngestion, self).__init__(spark, logger)
         self.max_files_per_trigger = 1000
+        self.watermark_time = '3 minutes'
+        self.checkpoint_location = 'hdfs:///tmp/JET/stream_movies_meta/checkpoint_dir/'
+        self.output_path = 'hdfs:///tmp/JET/stream_movies_meta/stream_output/'
 
     def read(self):
-        """"""
-        movies_meta_df = (self.spark.read.format('json').
+        """
+        read movie ratings source data and movies meta data
+        :return:
+        """
+        movies_meta_df = (self.spark.readStream.format('json').
                           option("mode", "PERMISSIVE").
                           option("columnNameOfCorruptRecord", "_corrupt_record").
                           option('allowBackslashEscapingAnyCharacter', 'true').
@@ -251,14 +267,36 @@ class MovieRatingsStreamingIngestion(Ingestion):
         ratings_df = (self.spark.readStream.format('csv').
                       option("maxFilesPerTrigger", int(self.max_files_per_trigger)).
                       load('hdfs:///tmp/JET/movies_csv/*'))
-        return ratings_df, movies_meta_df
+        return movies_meta_df, ratings_df
 
     def save(self,
              ratings_meta_df):
-        """"""
-        pass
+        """
+        save processed data to storage, below is the sample data once data is transformed
+        +--------------+----------+-------+-----------+----------+----+-----+----------+----------------------------+
+        |reviewerID    |asin      |ratings|rating_time|rating_dt |year|month|meta_asin |title                       |
+        +--------------+----------+-------+-----------+----------+----+-----+----------+----------------------------+
+        |A3TMUPDDXN8032|0738920630|4.0    |1283126400 |2010-08-30|2010|8    |0738920630|Works - Fun and Games [VHS] |
+        |A3UTPOE8HGE0RY|0738920630|4.0    |1104278400 |2004-12-29|2004|12   |0738920630|Works - Fun and Games [VHS] |
+        +--------------+----------+-------+-----------+----------+----+-----+----------+----------------------------+
+        :param ratings_meta_df:
+        :return:
+        """
+        # drop duplicates
+        ratings_meta_df = ratings_meta_df.withColumn('processed_time', current_timestamp().cast('long') * 1000)
+        ratings_meta_df = ratings_meta_df.withWatermark("processed_time", self.watermark_time).dropDuplicates(
+            ['asin', 'reviewerID', 'processed_time'])
+        ratings_meta_df = ratings_meta_df.drop('processed_time')
+        stream_writer = (ratings_meta_df.coalesce(self.num_coalesce).writeStream.format("parquet").
+                         option("checkpointLocation", self.checkpoint_location).
+                         outputMode("append").partitionBy(*self.partition_cols))
+        streaming_query = stream_writer.start(self.output_path)
 
     def process(self):
-        """"""
-        pass
-
+        """
+        Process movie ratings
+        :return:
+        """
+        movies_meta_df, ratings_df = self.read()
+        ratings_meta_df = self.transform(movies_meta_df, ratings_df)
+        self.save(ratings_meta_df)

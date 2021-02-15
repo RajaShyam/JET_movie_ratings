@@ -21,7 +21,7 @@ if __name__ == '__main__':
                             help='name of the job')
         parser.add_argument('--action',
                             type=str,
-                            choices=["ingest", "download_source"],
+                            choices=["ingest", "stream"],
                             default="ingest",
                             required=False,
                             help='which job to process')
