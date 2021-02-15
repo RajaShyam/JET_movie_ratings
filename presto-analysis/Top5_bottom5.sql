@@ -7,9 +7,9 @@ WITH avg_ratings AS
           MONTH,
           title,
           avg(ratings) AS avg_rating
-   FROM shyam.movie_ratings
-   WHERE YEAR={{ Year }}
-     AND MONTH={{ Month }}
+   FROM Jet_analysis.movie_ratings
+   WHERE YEAR=2003
+     AND MONTH=5
    GROUP BY 1,2,3,4)
 
 SELECT title, avg_rating from (

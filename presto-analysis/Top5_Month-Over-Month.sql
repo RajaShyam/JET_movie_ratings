@@ -6,7 +6,7 @@ WITH avg_ratings_current AS
           MONTH,
           title,
           avg(ratings) AS avg_rating
-   FROM shyam.movie_ratings
+   FROM Jet_analysis.movie_ratings
    WHERE YEAR=2003
      AND MONTH=7
    GROUP BY 1,2,3,4),
@@ -17,7 +17,7 @@ avg_ratings_previous AS
           MONTH,
           title,
           avg(ratings) AS avg_rating
-   FROM shyam.movie_ratings
+   FROM Jet_analysis.movie_ratings
    WHERE YEAR=2003
      AND MONTH=6
    GROUP BY 1,2,3,4),

@@ -1,7 +1,7 @@
-CREATE DATABASE IF NOT EXISTS shyam;
+CREATE DATABASE IF NOT EXISTS Jet_analysis;
 
 -- Create external table
-CREATE EXTERNAL TABLE `shyam.movie_ratings`(
+CREATE EXTERNAL TABLE `Jet_analysis.movie_ratings`(
   `reviewerID` string,
   `asin` string,
   `ratings` float,

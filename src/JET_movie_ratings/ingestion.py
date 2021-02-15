@@ -64,11 +64,13 @@ class Ingestion():
         :param ratings_df:
         :return:
         """
+        self.logger.info("Transforming ratings data - generating ratings_dt, year and month")
         ratings_df = ratings_df.withColumn('rating_dt', from_unixtime(ratings_df.rating_time, format='yyyy-MM-dd'))
         ratings_df = ratings_df.withColumn('month', month(ratings_df.rating_dt))
         ratings_df = ratings_df.withColumn('year', year(ratings_df.rating_dt))
         ratings_df = ratings_df.distinct()
         ratings_df.printSchema()
+        self.logger.info("Completed transformation of ratings data")
         return ratings_df
 
     def transform_meta_movies(self,
@@ -78,6 +80,7 @@ class Ingestion():
         :param movies_meta_df: movies meta source data
         :return: final_movies_meta_df: cleansed movies meta data
         """
+        self.logger.info("Transforming meta movies data - handles corrupt records by using regex")
         movies_meta_df.cache()
         movies_meta_filtered_df = movies_meta_df.filter(movies_meta_df["_corrupt_record"].isNull()).select('asin',
                                                                                                            'categories',
@@ -116,6 +119,7 @@ class Ingestion():
         final_movies_meta_df = movies_meta_filtered_df.unionByName(corrupted_records_df_formatted)
         final_movies_meta_df = final_movies_meta_df.withColumnRenamed('asin', 'meta_asin')
         final_movies_meta_df = final_movies_meta_df.distinct()
+        self.logger.info("Completed transformation of movies meta dataset")
         return final_movies_meta_df
 
     def transform(self,
@@ -127,11 +131,13 @@ class Ingestion():
         :param ratings_df: ratings source data
         :return: ratings_meta_df: combined data of ratings and meta
         """
+        self.logger.info("Transform ratings and meta movies data")
         ratings_df = self.transform_ratings(ratings_df)
         final_movies_meta_df = self.transform_meta_movies(movies_meta_df)
         ratings_meta_df = ratings_df.join(final_movies_meta_df, ratings_df.asin == final_movies_meta_df.meta_asin,
                                           'inner').select(*self.ratings_columns)
         ratings_meta_df.show(10, False)
+        self.logger.info("Completed transformation of ratings and movies meta datasets")
         return ratings_meta_df
 
     def add_hive_partitions(self, years, output_path):
@@ -141,9 +147,10 @@ class Ingestion():
         :param years: list of years in the dataset
         :return: None
         """
-        alter_stmt = "ALTER TABLE shyam.movie_ratings ADD IF NOT EXISTS PARTITION (year={year},month={month}) " \
+        self.logger.info("Starting to add hive partitions to the table")
+        alter_stmt = "ALTER TABLE Jet_analysis.movie_ratings ADD IF NOT EXISTS PARTITION (year={year},month={month}) " \
         " LOCATION '{output_path}/year={year}/month={month}/'"
-        alter_drop_stmt = "ALTER TABLE shyam.movie_ratings DROP IF EXISTS PARTITION (year={year},month={month})"
+        alter_drop_stmt = "ALTER TABLE Jet_analysis.movie_ratings DROP IF EXISTS PARTITION (year={year},month={month})"
         for year in years:
             for month in range(1, 13):
                 try:
@@ -153,6 +160,7 @@ class Ingestion():
                     self.spark.sql(alter_stmt.format(year=year, month=month,output_path=output_path))
                 except HiveExecutionException as err:
                     self.logger.info('Hive execution statement failed :- '+err)
+        self.logger.info("Completed addition of hive partitions to table")
 
     @abstractmethod
     def read(self):
@@ -192,13 +200,13 @@ class MovieRatingsBatchIngestion(Ingestion):
         """
         super(MovieRatingsBatchIngestion, self).__init__(spark, logger)
         self.output_path = 'hdfs:///tmp/JET/batch_movies_meta/output/batch_id=1613301962/'
-        #self.output_path = 's3://grubhub-gdp-source-data-assets-dev/nrajashyam/JE/output/batch_id=1613301962'
 
     def read(self):
         """
         read the data from source
         :return: movies_meta_data and ratings_data
         """
+        self.logger.info("reading the ratings and movie meta from source files")
         movies_meta_df = (self.spark.read.format('json').
                           option("mode", "PERMISSIVE").
                           option("columnNameOfCorruptRecord", "_corrupt_record").
@@ -223,9 +231,11 @@ class MovieRatingsBatchIngestion(Ingestion):
         :param ratings_meta_df: joined and transformed data of movie ratings and meta movies data
         :return: None
         """
+        self.logger.info("Started saving ratings_meta_movies data to storage")
         ratings_meta_df.coalesce(1).write.parquet(path=self.output_path,
                                                   mode='overwrite',
                                                   partitionBy=self.partition_cols)
+        self.logger.info("Completed save of ratings_meta_movies data")
 
     def process(self):
         """
@@ -258,6 +268,7 @@ class MovieRatingsStreamingIngestion(Ingestion):
         read movie ratings source data and movies meta data
         :return:
         """
+        self.logger.info("reading the ratings and movie meta from source files")
         movies_meta_df = (self.spark.readStream.format('json').
                           option("mode", "PERMISSIVE").
                           option("columnNameOfCorruptRecord", "_corrupt_record").
@@ -282,6 +293,7 @@ class MovieRatingsStreamingIngestion(Ingestion):
         :param ratings_meta_df:
         :return:
         """
+        self.logger.info("Started saving ratings_meta_movies data to storage")
         # drop duplicates
         ratings_meta_df = ratings_meta_df.withColumn('processed_time', current_timestamp().cast('long') * 1000)
         ratings_meta_df = ratings_meta_df.withWatermark("processed_time", self.watermark_time).dropDuplicates(
