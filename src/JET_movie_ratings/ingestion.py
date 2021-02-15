@@ -1,13 +1,8 @@
 import logging
-import argparse
-import sys
-import wget
-import os
 
 from abc import abstractmethod
 from pyspark.sql.types import StructType, StructField, StringType, FloatType, LongType, ArrayType, DoubleType
 from pyspark.sql.functions import from_unixtime, month, year ,udf, regexp_replace, col
-from pyspark.sql import SparkSession
 
 
 class HiveExecutionException(Exception):
@@ -254,36 +249,3 @@ class MovieRatingsStreamingIngestion(Ingestion):
         """"""
         pass
 
-
-if __name__ == '__main__':
-
-    def parse_args(params):
-        """
-        parser for parsing input arguments
-        :param params:
-        :return:
-        """
-        parser = argparse.ArgumentParser()
-
-        parser.add_argument('--job_name',
-                            type=str,
-                            required=True,
-                            help='name of the job')
-        parser.add_argument('--action',
-                            type=str,
-                            choices=["ingest", "download_source"],
-                            default="ingest",
-                            required=False,
-                            help='which job to process')
-        return parser.parse_args(params)
-
-
-    arguments = parse_args(sys.argv[1:])
-    logger = logging.getLogger(arguments.job_name)
-    logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-    logger.info(f"Parsed input arguments are : {arguments}")
-    spark_session = SparkSession.builder.appName(arguments.job_name).enableHiveSupport().getOrCreate()
-    spark_session.sparkContext.setLogLevel("WARN")
-    if arguments.action == 'ingest':
-        movieRatingsBatchIngestion = MovieRatingsBatchIngestion(spark_session)
-        movieRatingsBatchIngestion.process()

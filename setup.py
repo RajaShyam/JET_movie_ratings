@@ -13,5 +13,5 @@ setup(name=build_variables["module_name"],
       url="",
       package_dir={"": "src"},
       packages=find_packages("src"),
-      scripts=["scripts/download_files"]
+      scripts=["scripts/download_files","scripts/movie_ratings_ingestion.py"]
       )
