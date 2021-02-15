@@ -35,5 +35,5 @@ if __name__ == '__main__':
     spark_session = SparkSession.builder.appName(arguments.job_name).enableHiveSupport().getOrCreate()
     spark_session.sparkContext.setLogLevel("WARN")
     if arguments.action == 'ingest':
-        movieRatingsBatchIngestion = MovieRatingsBatchIngestion(spark_session)
+        movieRatingsBatchIngestion = MovieRatingsBatchIngestion(spark_session, logger)
         movieRatingsBatchIngestion.process()

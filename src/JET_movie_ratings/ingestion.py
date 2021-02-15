@@ -13,7 +13,9 @@ class Ingestion():
     """
     Generic ingestion
     """
-    def __init__(self, spark):
+    def __init__(self,
+                 spark,
+                 logger):
         """
         Initialize class variables
         :param spark:
@@ -24,6 +26,7 @@ class Ingestion():
                                 'rating_time', 'rating_dt', 'year',
                                 'month', 'meta_asin', 'title']
         self.partition_cols = ['year', 'month']
+        self.logger = logger
 
     @staticmethod
     def get_ratings_schema():
@@ -78,16 +81,12 @@ class Ingestion():
         for year in years:
             for month in range(1, 13):
                 try:
-                    logger.info(alter_drop_stmt.format(year=year,
-                                                       month=month))
-                    logger.info(alter_stmt.format(year=year,
-                                                     month=month))
-                    self.spark.sql(alter_drop_stmt.format(year=year,
-                                                       month=month))
-                    self.spark.sql(alter_stmt.format(year=year,
-                                                     month=month))
+                    self.logger.info(alter_drop_stmt.format(year=year, month=month))
+                    self.logger.info(alter_stmt.format(year=year, month=month))
+                    self.spark.sql(alter_drop_stmt.format(year=year, month=month))
+                    self.spark.sql(alter_stmt.format(year=year, month=month))
                 except HiveExecutionException as err:
-                    logger.info('Hive execution statement failed :- '+err)
+                    self.logger.info('Hive execution statement failed :- '+err)
 
 
 
@@ -122,12 +121,12 @@ class MovieRatingsBatchIngestion(Ingestion):
     """
     Movie Ratings Batch Ingestion
     """
-    def __init__(self, spark):
+    def __init__(self, spark, logger):
         """
         Initialize class variables
         :param spark: spark_session
         """
-        super(MovieRatingsBatchIngestion, self).__init__(spark)
+        super(MovieRatingsBatchIngestion, self).__init__(spark, logger)
 
     def read(self):
         """
@@ -169,7 +168,7 @@ class MovieRatingsBatchIngestion(Ingestion):
             try:
                 obj = eval(row)
             except Exception as e:
-                logging.warning('Failure to parse record {0} with error {1}'.format(str(row), str(e.args)))
+                self.logger.warning('Failure to parse record {0} with error {1}'.format(str(row), str(e.args)))
                 record = ()
             else:
                 asin = obj.get('asin')
@@ -228,7 +227,7 @@ class MovieRatingsBatchIngestion(Ingestion):
         self.save(ratings_meta_df)
         row_years = ratings_meta_df.select('year').distinct().collect()
         years = [r.year for r in row_years]
-        logger.info(years)
+        self.logger.info(years)
         self.add_hive_partitions(years)
 
 
@@ -241,7 +240,8 @@ class MovieRatingsStreamingIngestion(Ingestion):
         """"""
         pass
 
-    def save(self):
+    def save(self,
+             ratings_meta_df):
         """"""
         pass
 
