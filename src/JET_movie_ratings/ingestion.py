@@ -69,6 +69,68 @@ class Ingestion():
         ratings_df.printSchema()
         return ratings_df
 
+    def transform_meta_movies(self,
+                              movies_meta_df):
+        """
+        perform transformations on meta movies data and clean up
+        :param movies_meta_df: movies meta source data
+        :return: final_movies_meta_df: cleansed movies meta data
+        """
+        movies_meta_df.cache()
+        movies_meta_filtered_df = movies_meta_df.filter(movies_meta_df["_corrupt_record"].isNull()).select('asin',
+                                                                                                           'categories',
+                                                                                                           'title',
+                                                                                                           'price')
+        movies_meta_df.filter(movies_meta_df["_corrupt_record"].isNotNull()).count()
+        #movies_meta_df.filter(movies_meta_df['_corrupt_record'].isNotNull()).select('_corrupt_record').show(5, False)
+        corrupted_records_df = movies_meta_df.filter(movies_meta_df["_corrupt_record"].isNotNull())
+        corrupted_records_df = corrupted_records_df.withColumn('_corrupt_record',
+                                                               regexp_replace(corrupted_records_df['_corrupt_record'],
+                                                                              self.reg_ex,
+                                                                              ""))
+
+        def transform_row(row):
+            try:
+                obj = eval(row)
+            except Exception as e:
+                logging.warning('Failure to parse record {0} with error {1}'.format(str(row), str(e.args)))
+                record = ()
+            else:
+                asin = obj.get('asin')
+                categories = obj.get('categories')
+                title = obj.get('title')
+                price = obj.get('price')
+                record = (asin,
+                          categories,
+                          title,
+                          price)
+                return record
+
+        transform_udf = udf(transform_row, self.get_movies_meta_schema())
+        corrupted_records_df = corrupted_records_df.withColumn('corrected_data',
+                                                               transform_udf(corrupted_records_df['_corrupt_record']))
+        corrupted_records_df_formatted = corrupted_records_df.filter(col('corrected_data').isNotNull()).select(
+            'corrected_data.*')
+        final_movies_meta_df = movies_meta_filtered_df.unionByName(corrupted_records_df_formatted)
+        final_movies_meta_df = final_movies_meta_df.withColumnRenamed('asin', 'meta_asin')
+        return final_movies_meta_df
+
+    def transform(self,
+                  movies_meta_df,
+                  ratings_df):
+        """
+        perform transformations on movies meta and ratings data
+        :param movies_meta_df: movies meta source data
+        :param ratings_df: ratings source data
+        :return: ratings_meta_df: combined data of ratings and meta
+        """
+        ratings_df = self.transform_ratings(ratings_df)
+        final_movies_meta_df = self.transform_meta_movies(movies_meta_df)
+        ratings_meta_df = ratings_df.join(final_movies_meta_df, ratings_df.asin == final_movies_meta_df.meta_asin,
+                                          'inner').select(*self.ratings_columns)
+        ratings_meta_df.show(10, False)
+        return ratings_meta_df
+
     def add_hive_partitions(self, years):
         """
         Adds hive partitions to the table
@@ -144,68 +206,6 @@ class MovieRatingsBatchIngestion(Ingestion):
                            schema=self.get_ratings_schema()))
         return movies_meta_df, ratings_df
 
-    def transform_meta_movies(self,
-                              movies_meta_df):
-        """
-        perform transformations on meta movies data and clean up
-        :param movies_meta_df: movies meta source data
-        :return: final_movies_meta_df: cleansed movies meta data
-        """
-        movies_meta_df.cache()
-        movies_meta_filtered_df = movies_meta_df.filter(movies_meta_df["_corrupt_record"].isNull()).select('asin',
-                                                                                                           'categories',
-                                                                                                           'title',
-                                                                                                           'price')
-        movies_meta_df.filter(movies_meta_df["_corrupt_record"].isNotNull()).count()
-        #movies_meta_df.filter(movies_meta_df['_corrupt_record'].isNotNull()).select('_corrupt_record').show(5, False)
-        corrupted_records_df = movies_meta_df.filter(movies_meta_df["_corrupt_record"].isNotNull())
-        corrupted_records_df = corrupted_records_df.withColumn('_corrupt_record',
-                                                               regexp_replace(corrupted_records_df['_corrupt_record'],
-                                                                              self.reg_ex,
-                                                                              ""))
-
-        def transform_row(row):
-            try:
-                obj = eval(row)
-            except Exception as e:
-                self.logger.warning('Failure to parse record {0} with error {1}'.format(str(row), str(e.args)))
-                record = ()
-            else:
-                asin = obj.get('asin')
-                categories = obj.get('categories')
-                title = obj.get('title')
-                price = obj.get('price')
-                record = (asin,
-                          categories,
-                          title,
-                          price)
-                return record
-
-        transform_udf = udf(transform_row, self.get_movies_meta_schema())
-        corrupted_records_df = corrupted_records_df.withColumn('corrected_data',
-                                                               transform_udf(corrupted_records_df['_corrupt_record']))
-        corrupted_records_df_formatted = corrupted_records_df.filter(col('corrected_data').isNotNull()).select(
-            'corrected_data.*')
-        final_movies_meta_df = movies_meta_filtered_df.unionByName(corrupted_records_df_formatted)
-        final_movies_meta_df = final_movies_meta_df.withColumnRenamed('asin', 'meta_asin')
-        return final_movies_meta_df
-
-    def transform(self,
-                  movies_meta_df,
-                  ratings_df):
-        """
-        perform transformations on movies meta and ratings data
-        :param movies_meta_df: movies meta source data
-        :param ratings_df: ratings source data
-        :return: ratings_meta_df: combined data of ratings and meta
-        """
-        ratings_df = self.transform_ratings(ratings_df)
-        final_movies_meta_df = self.transform_meta_movies(movies_meta_df)
-        ratings_meta_df = ratings_df.join(final_movies_meta_df, ratings_df.asin == final_movies_meta_df.meta_asin,
-                                          'inner').select(*self.ratings_columns)
-        ratings_meta_df.show(10, False)
-        return ratings_meta_df
-
     def save(self,
              ratings_meta_df):
         """
@@ -235,10 +235,23 @@ class MovieRatingsStreamingIngestion(Ingestion):
     """
     Movie Ratings streaming ingestion
     """
+    def __init__(self, spark, logger):
+        """"""
+        super(MovieRatingsStreamingIngestion, self).__init__(spark, logger)
+        self.max_files_per_trigger = 1000
 
     def read(self):
         """"""
-        pass
+        movies_meta_df = (self.spark.read.format('json').
+                          option("mode", "PERMISSIVE").
+                          option("columnNameOfCorruptRecord", "_corrupt_record").
+                          option('allowBackslashEscapingAnyCharacter', 'true').
+                          load('hdfs:///tmp/JET/meta_movies/meta_Movies_and_TV.json.gz'))
+
+        ratings_df = (self.spark.readStream.format('csv').
+                      option("maxFilesPerTrigger", int(self.max_files_per_trigger)).
+                      load('hdfs:///tmp/JET/movies_csv/*'))
+        return ratings_df, movies_meta_df
 
     def save(self,
              ratings_meta_df):
