@@ -2,7 +2,7 @@ import logging
 import sys
 import argparse
 
-from JET_movie_ratings.ingestion import MovieRatingsBatchIngestion
+from JET_movie_ratings.ingestion import MovieRatingsBatchIngestion, MovieRatingsStreamingIngestion
 from pyspark.sql import SparkSession
 
 if __name__ == '__main__':
@@ -37,3 +37,6 @@ if __name__ == '__main__':
     if arguments.action == 'ingest':
         movieRatingsBatchIngestion = MovieRatingsBatchIngestion(spark_session, logger)
         movieRatingsBatchIngestion.process()
+    elif arguments.action == 'stream':
+        movieRatingsStreamingIngestion = MovieRatingsStreamingIngestion(spark_session, logger)
+        movieRatingsStreamingIngestion.process()
