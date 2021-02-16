@@ -15,7 +15,7 @@ Now the project initial scripts are installed as module. The below files are ava
 This file helps to setup pipeline of jobs - `src/JET_movie_ratings/azkaban/project.py`
 
 ## How to build the azkaban job?
-`azkaban build -c -p project.py -u nrajashyam@domain-name:8081`
+`azkaban build -c -p project.py -u username@domain-name:8081`
 
 ### Hive Table
 
