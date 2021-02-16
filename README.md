@@ -6,7 +6,7 @@
 3. Navigate to project directory - `cd JET_movie_ratings;`
 4. Install the module - `sudo python3 setup.py clean build install`
 
-Now the project initial scripts are installed as module. The below files are available as executable files.
+Now the project initial scripts are installed as module. The below are the executable files - 
 
 1. This executable file is responsible for setup of source data in hdfs - `/usr/local/bin/download_files`
 2. This executable file is a trigger file to initiate the Movie Ratings ingestion process - `/usr/local/bin/movie_ratings_ingestion.py`
@@ -14,7 +14,7 @@ Now the project initial scripts are installed as module. The below files are ava
 ### Workflow orchestration tool - azkaban
 This file helps to setup pipeline of jobs - `src/JET_movie_ratings/azkaban/project.py`
 
-## How to build the azkaban job?
+### How to build the azkaban job?
 `azkaban build -c -p project.py -u username@domain-name:8081`
 
 ### Hive Table
@@ -57,6 +57,9 @@ Download movie ratings and meta to local hdfs for further processing. Execute th
 ### Streaming ingestion
 
 `spark-submit --num-executors 20 --executor-cores 6 /usr/local/bin/movie_ratings_ingestion.py --job_name movie_ratings --action stream`
+
+* micro-batch processing
+* Streaming deduplication with watermarking
 
 ### Presto analysis
 
